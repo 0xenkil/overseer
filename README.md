@@ -1,4 +1,13 @@
-# Overseer
+<p align="center">
+  <img src="assets/overseer-banner.svg" alt="Overseer" width="840">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-22d3ee"></a>
+  <img alt="Python 3.8+" src="https://img.shields.io/badge/python-3.8%2B-34d399">
+  <img alt="dependencies: 0" src="https://img.shields.io/badge/dependencies-0-34d399">
+  <img alt="platform: Linux" src="https://img.shields.io/badge/platform-Linux-8aa0b8">
+</p>
 
 **The lean, self-healing AI agent that runs your server from Telegram.**
 
@@ -81,7 +90,24 @@ It chains these in a loop, verifying as it goes, before replying — and **auto-
 - List your **`protected_services`** (e.g. `xray`, `tor`); the agent won't stop/reconfigure them — or do destructive/irreversible actions — without explicit confirmation.
 - Secrets (`config.json`, state) are `chmod 600` and `.gitignore`d. Run it on a box you own.
 
-## Architecture
+## How it works
+
+```mermaid
+flowchart LR
+    U(["📱 You"]) <-->|long-poll| TG["Telegram"]
+    TG <--> A["Agent loop"]
+    A -->|chat| P{"Provider"}
+    P --> G["Gemini"]
+    P --> Q["Groq"]
+    P --> C["Claude"]
+    A -->|tool calls| T["run_shell · web_fetch<br/>read/write_file"]
+    T --> SRV[("🖥️ Your server")]
+    D["🩺 Doctor"] -. self-heal .-> TG
+    W["👁️ Watchdog"] -. alerts .-> TG
+```
+
+📐 **Full diagrams** — message flow, resilience/auto-recovery, the provider abstraction, and
+the watchdog — are in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ```
 overseer/
