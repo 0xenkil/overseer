@@ -42,7 +42,7 @@ OpenClaw (and lean clones like Nanobot/ZeroClaw) are *general* AI assistants —
 On your VPS (Linux, Python 3.8+):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/enuka2007/overseer/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/0xenkil/overseer/main/install.sh | sh
 overseer setup
 ```
 
@@ -132,4 +132,4 @@ care which brain is plugged in.
 
 ## License
 
-MIT © 2026 TheENkil
+MIT © 2026 0xenkil
