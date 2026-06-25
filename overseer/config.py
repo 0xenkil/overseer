@@ -14,8 +14,14 @@ DEFAULTS = {
     "cmd_timeout": 180,              # per-shell-command timeout (s)
     "max_tool_iters": 25,            # max tool calls per user message
     "protected_services": [],        # systemd services the agent must not touch w/o confirmation
-    "owner_chat_id": "",             # where the doctor sends health alerts (defaults to first allowed)
+    "owner_chat_id": "",             # where the doctor + watchdog send alerts (defaults to first allowed)
     "state_dir": "",                 # conversation memory; defaults next to the config
+    # proactive watchdog - messages the owner when the box does something unusual
+    "watch_enabled": True,
+    "watch_interval": 300,           # seconds between checks
+    "watch_disk_pct": 90,            # alert when disk crosses this %
+    "watch_mem_mb": 100,             # alert when available memory drops below this
+    "watch_load_mult": 4,            # alert when 5-min load > this * cpu cores
 }
 
 

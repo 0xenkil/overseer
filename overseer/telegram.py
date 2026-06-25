@@ -54,8 +54,13 @@ class Telegram:
             pass
 
     def send(self, chat_id, text):
+        # Try Markdown for nice formatting; if the model emitted broken markdown,
+        # fall back to plain text so the message always gets delivered.
         for chunk in _split(text):
             try:
-                self.call("sendMessage", {"chat_id": chat_id, "text": chunk}, timeout=20)
+                self.call("sendMessage", {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}, timeout=20)
             except Exception:
-                pass
+                try:
+                    self.call("sendMessage", {"chat_id": chat_id, "text": chunk}, timeout=20)
+                except Exception:
+                    pass

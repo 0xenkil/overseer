@@ -12,6 +12,7 @@ from . import config as configmod
 from . import providers
 from . import tools as toolmod
 from . import doctor
+from . import watchdog
 from .persona import system_prompt
 from .telegram import Telegram
 
@@ -152,6 +153,25 @@ class Agent:
             except Exception as e:
                 log("health err", e)
 
+    def watchdog_loop(self):
+        """Proactively message the owner when the box does something unusual."""
+        if not self.cfg.get("watch_enabled", True):
+            return
+        owner = self.cfg.get("owner_chat_id")
+        interval = self.cfg.get("watch_interval", 300)
+        prev = None
+        while True:
+            try:
+                cur = watchdog.snapshot(self.cfg)
+                for alert in watchdog.diff(prev, cur, self.cfg):
+                    log("watchdog:", alert)
+                    if owner:
+                        self.tg.send(owner, "👁 *Overseer noticed:*\n" + alert)
+                prev = cur
+            except Exception as e:
+                log("watchdog err", e)
+            time.sleep(interval)
+
     def run(self):
         log(f"Overseer up. provider={self.cfg.get('provider')} models={self.provider.models} allowed={sorted(self.allowed)}")
         self.tg.delete_webhook(True)
@@ -164,6 +184,7 @@ class Agent:
         ])
         threading.Thread(target=self.worker, daemon=True).start()
         threading.Thread(target=self.health_loop, daemon=True).start()
+        threading.Thread(target=self.watchdog_loop, daemon=True).start()
         offset = 0
         while True:
             try:
