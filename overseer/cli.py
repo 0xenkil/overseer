@@ -61,6 +61,36 @@ TG_COMMANDS = [
     {"command": "whoami", "description": "your id + backend"},
 ]
 
+# Friendly model choices per provider (label -> model id; None = auto/recommended chain).
+# Users pick by description, never by typing a raw model id.
+MODEL_CHOICES = {
+    "gemini-api": [
+        ("Balanced - recommended", None),
+        ("Fast & cheap", "gemini-2.0-flash"),
+        ("Smartest", "gemini-2.5-pro"),
+    ],
+    "groq": [
+        ("Smart - recommended", None),
+        ("Fastest", "openai/gpt-oss-20b"),
+        ("Qwen 32B", "qwen/qwen3-32b"),
+        ("Llama 4 Scout", "meta-llama/llama-4-scout-17b-16e-instruct"),
+    ],
+    "claude": [
+        ("Fast - recommended", None),
+        ("Smarter (Sonnet)", "claude-sonnet-4-6"),
+        ("Most powerful (Opus)", "claude-opus-4-8"),
+    ],
+}
+
+
+def _pick_model(prov, cfg):
+    choices = MODEL_CHOICES.get(prov)
+    if not choices:
+        cfg["model"] = None
+        return
+    picked = _choose("Which model? (you can change this anytime)", [c[0] for c in choices], default_idx=0)
+    cfg["model"] = dict(choices)[picked]
+
 
 def cmd_setup(args):
     print(f"\n========== Overseer setup (v{__version__}) ==========")
@@ -96,6 +126,8 @@ def cmd_setup(args):
             print(f"rejected: {detail[:50]} ... you can fix it later with `overseer provider`.")
     except Exception as e:
         print(f"couldn't verify ({str(e)[:40]}).")
+
+    _pick_model(prov, cfg)
 
     # ---- STEP 2: the Telegram bot ----
     print("\nSTEP 2 of 3  -  Create your Telegram bot (this is how you'll chat with it)\n")
@@ -222,16 +254,19 @@ def cmd_status(args):
 
 def cmd_provider(args):
     cfg = configmod.load()
-    prov = _choose("Switch backend to:", list(providers.PROVIDERS.keys()),
-                   default_idx=list(providers.PROVIDERS).index(cfg.get("provider", "gemini-api")))
+    names = list(providers.PROVIDERS.keys())
+    cur = cfg.get("provider", names[0])
+    prov = _choose("Switch backend to:", names, default_idx=names.index(cur) if cur in names else 0)
     cfg["provider"] = prov
-    if prov != "gemini-oauth":
-        cfg["api_key"] = _ask(f"{prov} API key", default=cfg.get("api_key") or None)
-    cfg["model"] = None
+    label, link, _steps = KEY_HELP[prov]
+    print(f"\nGet your {label}: {link}")
+    cfg["api_key"] = _ask(f"Paste your {label}", default=cfg.get("api_key") or None)
+    _pick_model(prov, cfg)
     configmod.save(cfg)
+    print("checking ...", end=" ", flush=True)
     ok, detail = providers.build(cfg, "ping").ping()
-    print(f"Switched to {prov}: {'OK' if ok else 'FAILED'} ({detail})")
-    if _ask("Restart the service to apply? (y/n)", default="y").lower().startswith("y"):
+    print("works!" if ok else f"check the key ({detail[:50]})")
+    if _ask("Restart the agent to apply now? (y/n)", default="y").lower().startswith("y"):
         _sc("restart", SERVICE)
         print("restarted.")
 

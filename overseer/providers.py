@@ -38,9 +38,15 @@ class Reply:
         self.assistant_turn = assistant_turn  # native turn to append to history
 
 
+# Some provider APIs (Groq, Anthropic) sit behind Cloudflare, which bans the default
+# "Python-urllib" User-Agent with a 403/1010. Present a normal UA so requests go through.
+_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+       "Chrome/124.0 Safari/537.36 Overseer/0.2")
+
+
 def _post(url, headers, body, timeout=120):
     req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", **headers})
+                                 headers={"Content-Type": "application/json", "User-Agent": _UA, **headers})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r)
@@ -58,7 +64,7 @@ def _post(url, headers, body, timeout=120):
 
 
 def _get(url, headers, timeout=20):
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, **headers})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
 
@@ -183,7 +189,9 @@ class GeminiOAuth(GeminiAPI):
 # ----------------------------------------------------------------------------- Groq (OpenAI-compatible)
 class Groq(Provider):
     name = "groq"
-    default_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    # gpt-oss models emit clean OpenAI-style tool calls; llama-3.3-70b often malforms them
+    # (Groq returns tool_use_failed), so it is deliberately NOT the default.
+    default_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"]
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     def _tools(self):
