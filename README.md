@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/overseer-banner.svg" alt="Overseer" width="840">
+  <img src="assets/banner.svg" alt="Overseer" width="840">
 </p>
 
 <p align="center">
