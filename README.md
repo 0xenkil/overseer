@@ -1,29 +1,28 @@
 # Overseer
 
-**A lean, self-healing AI agent that runs your server from Telegram.**
+**The lean, self-healing AI agent that runs your server from Telegram.**
 
-Message your bot, it does the work — sysadmin, automation, coding, research, OSINT/recon — by actually running commands on the box and verifying the result. One Python file's worth of dependencies (zero — it's **stdlib only**), so it drops onto the tiniest VPS and starts in milliseconds.
+Message your bot, it does the work — sysadmin, automation, monitoring, scripting, research — by actually running commands on the box and verifying the result. **Zero dependencies** (pure Python stdlib), so it drops onto the tiniest VPS and starts in milliseconds.
 
 ```
-you:      nginx down?
-overseer: Yeah — OOM-killed 3h ago. Restarted it, it's up, bumped its mem cap so it won't recur.
+you:      anything failing?
+overseer: nginx flapped 3× in the last hour — bad server block in a reload loop.
+          Fixed it, reloaded clean. Quiet now. Also: disk's at 86%, want me to clear old logs?
 
-you:      OSINT on the username "naval"
-overseer: 3 hits — @naval (X, AngelList founder), naval.eth, nav.al (personal blog, Cloudflare).
-          Pulled the blog's RSS + linked socials. Want the email footprint too?
+you:      yeah do it
+overseer: Cleared 4.2G of rotated logs + apt cache. Disk now 71%. 👍
 ```
 
 ---
 
-## Why
+## Why another one?
 
-Most "AI on your server" setups are heavy frameworks that eat 500MB+, pin themselves to one model, and fall over when a token expires. Overseer is the opposite:
+"AI on your server over Telegram" is a crowded space now — OpenClaw made it popular, and there's a wave of lean clones (Nanobot, ZeroClaw, Hermes…). Overseer isn't trying to be first. It's trying to be the **smallest, most robust, and safest** one in that lane:
 
-- **Tiny & fast** — pure Python stdlib, ~12MB resident, runs on a 512MB box without noticing.
-- **Bring any brain** — Gemini (API key *or* OAuth), Groq, or Claude. Switch with one command.
-- **Self-healing** — a built-in *doctor* diagnoses failures (bad key, rate limit, network) and tells you the exact fix over Telegram. systemd restarts it; the doctor explains *why* it fell over.
-- **Actually does things** — real shell access, web fetch, file read/write, in a tool-calling loop until the job's done. It acts, then reports — it doesn't lecture or ask permission for safe stuff.
-- **Locked to you** — only your Telegram chat id(s) can command it.
+- **Smallest** — **truly zero dependencies**, pure stdlib, ~12 MB resident. No `pip install`, no Node, no Docker. The lean clones still pull in libraries; Overseer pulls in *nothing*, so it runs on a 512 MB box without noticing. (OpenClaw eats ~700 MB+.)
+- **Most robust** — it survives the real-world walls the new clones haven't hit yet: provider rate-limits (model fallback + backoff), Cloudflare bot-blocks, reasoning-model quirks, and oversized requests (it **auto-trims its own context and retries** instead of failing).
+- **Safest** — locked to *your* Telegram id, a protected-services list it won't touch, confirmation before destructive actions, and secrets kept `chmod 600`. (Palo Alto Networks literally called OpenClaw a "security nightmare" — this is the boring, careful alternative.)
+- **Self-healing** — a built-in *doctor* diagnoses failures (bad key, rate-limit, network) and DMs you the exact fix, plus a **watchdog** that proactively pings you when a service dies, disk fills, load spikes, or the box reboots.
 
 ## Install
 
@@ -34,20 +33,21 @@ curl -fsSL https://raw.githubusercontent.com/TheENkil/overseer/main/install.sh |
 overseer setup
 ```
 
-`setup` walks you through: pick a backend, paste the key, paste your Telegram bot token (from [@BotFather](https://t.me/BotFather)), and it **auto-detects your chat id** (just message the bot when it asks). Then it installs the 24/7 systemd service. Done.
+`setup` is a guided 3-step wizard: pick a backend (it shows you exactly where to get the key), create a Telegram bot via [@BotFather](https://t.me/BotFather), and it **auto-detects your chat id** (just message the bot when it asks). Then it installs the 24/7 service. Done.
 
 No git? Clone/copy the folder anywhere and run `python3 -m overseer setup`.
 
 ## Backends
 
-| Provider | Auth | Notes |
-|---|---|---|
-| `gemini-api` | Google AI Studio key | Free tier; great default. |
-| `gemini-oauth` | `google-gemini-cli` login | Higher quota, incl. Pro. *Experimental.* |
-| `groq` | Groq API key | Blazing fast (Llama 3.3 70B etc.). |
-| `claude` | Anthropic API key | Strongest reasoning/tool use. |
+Pick by friendly label (Fast / Smart / …) — you never touch a raw model id. Each has a built-in fallback chain + backoff, so a transient `429`/`503` won't kill a task.
 
-Each model has a built-in fallback chain + backoff, so a transient `429`/`503` won't kill a task. Switch anytime:
+| Backend | Key (free tier) | Notes |
+|---|---|---|
+| `gemini` | [aistudio.google.com](https://aistudio.google.com/apikey) | Easy, solid all-rounder. |
+| `groq` | [console.groq.com](https://console.groq.com/keys) | Free + very fast (default: `gpt-oss-120b`). |
+| `claude` | [console.anthropic.com](https://console.anthropic.com/settings/keys) | Strongest reasoning, paid. |
+
+Switch backend or model anytime:
 
 ```bash
 overseer provider
@@ -56,49 +56,49 @@ overseer provider
 ## Commands
 
 ```
-overseer setup       first-time wizard (creds, telegram, chat-id, install)
-overseer run         run in the foreground
+overseer setup       guided first-time setup (creds, telegram, chat-id, install)
 overseer install     install + start the systemd service
 overseer doctor      full health checkup (telegram, LLM creds, disk, memory)
 overseer status      service status
-overseer provider    switch AI backend
+overseer provider    switch AI backend / model
 overseer logs        tail the live logs
 overseer start|stop|restart
 ```
 
-In Telegram: `/new` (reset memory) · `/status` (health) · `/whoami` (model + your chat id).
+In Telegram (the `/` menu lists them): `/status` (health) · `/model` (current AI) · `/new` (reset memory) · `/whoami` · `/help`.
 
-## Tools the agent has
+## What the agent can do
 
 - **run_shell** — bash as root
 - **web_fetch** — pull any URL/API (HTML stripped)
 - **write_file** / **read_file**
 
-It chains these in a loop, verifying as it goes, before replying.
+It chains these in a loop, verifying as it goes, before replying — and **auto-compacts** old tool output when a request gets too big for the model's token limit, so long multi-step tasks complete instead of erroring.
 
 ## Safety
 
-- The agent runs commands **as root** and obeys whoever can message the bot — so it's **locked to your `allowed_chat_ids`**, and nobody else's messages are processed.
-- List your **`protected_services`** (e.g. `xray`, `tor`) in setup; the agent won't touch them, and won't do destructive/irreversible actions, without explicit confirmation.
-- Secrets (`config.json`, state) are `chmod 600` and `.gitignore`d. Run it on a box you own and control.
+- Runs commands **as root** and obeys whoever can message the bot — so it's **locked to your `allowed_chat_ids`**; everyone else is ignored.
+- List your **`protected_services`** (e.g. `xray`, `tor`); the agent won't stop/reconfigure them — or do destructive/irreversible actions — without explicit confirmation.
+- Secrets (`config.json`, state) are `chmod 600` and `.gitignore`d. Run it on a box you own.
 
 ## Architecture
 
 ```
 overseer/
   agent.py      telegram long-poll -> provider loop -> tools  (the runtime)
-  providers.py  Gemini-API | Gemini-OAuth | Groq | Claude behind one interface
+  providers.py  Gemini | Groq | Claude behind one interface (fallback + backoff + auto-compact)
   tools.py      run_shell, web_fetch, write_file, read_file
   doctor.py     health checks + failure diagnosis + self-healing alerts
+  watchdog.py   proactive anomaly alerts (service down, disk, load, reboot)
   persona.py    the voice
   telegram.py   tiny Bot API client
   config.py     JSON config (+ env overrides)
-  cli.py        setup wizard + service management
+  cli.py        guided setup wizard + service management
 ```
 
 Each provider keeps the conversation in its own native format and exposes a uniform
-`chat / user_turn / tool_results_turn` surface, so the agent loop never has to care
-which brain is plugged in.
+`chat / user_turn / tool_results_turn / compact` surface, so the agent loop never has to
+care which brain is plugged in.
 
 ## License
 
