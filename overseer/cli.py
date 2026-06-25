@@ -44,9 +44,8 @@ def cmd_setup(args):
 
     # 1. provider
     prov = _choose("Which AI backend should power the agent?",
-                   ["gemini-api  (Google AI Studio key - free tier)",
-                    "gemini-oauth  (google-gemini-cli login - higher quota, experimental)",
-                    "groq  (Groq API key - very fast)",
+                   ["gemini-api  (Google AI Studio key - free, easy)",
+                    "groq  (Groq API key - free + very fast, recommended)",
                     "claude  (Anthropic API key - strongest)"],
                    default_idx=0).split()[0]
     cfg["provider"] = prov
@@ -68,26 +67,33 @@ def cmd_setup(args):
     # 4. telegram token
     cfg["telegram_token"] = _ask("Telegram bot token (from @BotFather)", default=cfg.get("telegram_token") or None, secret=True)
 
-    # 5. chat-id auto-detect
+    # 5. chat-id auto-detect (pause the running service first so it doesn't eat the update)
     tg = Telegram(cfg["telegram_token"])
     try:
         me = tg.get_me()
         print(f"Connected to bot: @{me['result']['username']}")
     except Exception as e:
         print(f"! couldn't reach the bot ({e}). Double-check the token.")
-    print("\nNow OPEN Telegram and send any message to your bot (so I can capture your chat id).")
-    input("Press Enter once you've messaged it... ")
+    paused = _sc("is-active", SERVICE).strip() == "active"
+    if paused:
+        print("(pausing the running agent so it doesn't grab the message)")
+        _sc("stop", SERVICE)
+    tg.delete_webhook(False)  # keep pending updates - don't drop the user's message
     ids = []
-    try:
-        tg.delete_webhook(True)
-        for u in tg.get_updates(timeout=2).get("result", []):
-            m = u.get("message") or u.get("edited_message") or {}
-            ch = m.get("chat", {})
-            if ch.get("id") and str(ch["id"]) not in ids:
-                ids.append(str(ch["id"]))
-                print(f"  found chat: {ch['id']}  ({ch.get('username') or ch.get('first_name','?')})")
-    except Exception as e:
-        print(f"  (couldn't auto-detect: {e})")
+    print("\nOpen Telegram and send ANY message to your bot now.")
+    input("Press Enter AFTER you've sent it... ")
+    print("listening for your message (up to ~20s)...")
+    off, deadline = 0, time.time() + 20
+    while time.time() < deadline and not ids:
+        try:
+            for u in tg.get_updates(offset=off, timeout=3).get("result", []):
+                off = u["update_id"] + 1
+                ch = (u.get("message") or u.get("edited_message") or {}).get("chat", {})
+                if ch.get("id") and str(ch["id"]) not in ids:
+                    ids.append(str(ch["id"]))
+                    print(f"  got it -> {ch['id']}  ({ch.get('username') or ch.get('first_name', '?')})")
+        except Exception:
+            time.sleep(1)
     if ids:
         keep = _ask(f"Lock the agent to these chat id(s) {','.join(ids)}? (comma-list to edit)", default=",".join(ids))
         cfg["allowed_chat_ids"] = [x.strip() for x in keep.split(",") if x.strip()]
@@ -112,7 +118,10 @@ def cmd_setup(args):
     if os.name == "posix" and _ask("Install as a 24/7 systemd service now? (y/n)", default="y").lower().startswith("y"):
         cmd_install(args)
     else:
-        print("\nDone. Start it anytime with:  overseer run   (foreground)  or  overseer install  (service)")
+        if paused:
+            _sc("start", SERVICE)
+            print("(resumed the running agent with the new config)")
+        print("\nDone. Start it anytime with:  overseer install  (service)  or  overseer run  (foreground)")
 
 
 def _service_unit():
