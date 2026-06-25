@@ -9,9 +9,9 @@
   <img alt="platform: Linux" src="https://img.shields.io/badge/platform-Linux-8aa0b8">
 </p>
 
-**The lean, self-healing AI agent that runs your server from Telegram.**
+**An AI agent that runs your server — and keeps watch over it.**
 
-Message your bot, it does the work — sysadmin, automation, monitoring, scripting, research — by actually running commands on the box and verifying the result. **Zero dependencies** (pure Python stdlib), so it drops onto the tiniest VPS and starts in milliseconds.
+Overseer lives on your box, watches it around the clock, and pings you the moment something breaks. Need something done? Just text it — *"disk's full?"*, *"restart nginx"*, *"why's it slow?"* — and it runs the commands, checks the result, and reports back. No SSH, no remembering flags. Tiny enough (zero-dependency, pure Python stdlib) to sit on the smallest VPS without you noticing.
 
 ```
 you:      anything failing?
@@ -24,14 +24,18 @@ overseer: Cleared 4.2G of rotated logs + apt cache. Disk now 71%. 👍
 
 ---
 
-## Why another one?
+## What it does
 
-"AI on your server over Telegram" is a crowded space now — OpenClaw made it popular, and there's a wave of lean clones (Nanobot, ZeroClaw, Hermes…). Overseer isn't trying to be first. It's trying to be the **smallest, most robust, and safest** one in that lane:
+- **🖥️ Runs your server on command** — text a task in plain English; it runs the shell commands, verifies the outcome, and reports. Your server, one Telegram message away.
+- **👁️ Keeps an eye on it 24/7** — a built-in watchdog proactively pings *you* when a service dies, disk fills, load spikes, or the box reboots. You hear about problems *before* you go looking.
+- **🩺 Heals itself** — a doctor diagnoses failures (bad key, rate-limit, network) and DMs you the exact fix; it auto-recovers from provider rate-limits and oversized requests instead of falling over.
+- **🔒 Stays in its lane** — locked to *your* Telegram id, won't touch services you mark protected, and confirms before anything destructive. Secrets stay `chmod 600`.
 
-- **Smallest** — **truly zero dependencies**, pure stdlib, ~12 MB resident. No `pip install`, no Node, no Docker. The lean clones still pull in libraries; Overseer pulls in *nothing*, so it runs on a 512 MB box without noticing. (OpenClaw eats ~700 MB+.)
-- **Most robust** — it survives the real-world walls the new clones haven't hit yet: provider rate-limits (model fallback + backoff), Cloudflare bot-blocks, reasoning-model quirks, and oversized requests (it **auto-trims its own context and retries** instead of failing).
-- **Safest** — locked to *your* Telegram id, a protected-services list it won't touch, confirmation before destructive actions, and secrets kept `chmod 600`. (Palo Alto Networks literally called OpenClaw a "security nightmare" — this is the boring, careful alternative.)
-- **Self-healing** — a built-in *doctor* diagnoses failures (bad key, rate-limit, network) and DMs you the exact fix, plus a **watchdog** that proactively pings you when a service dies, disk fills, load spikes, or the box reboots.
+It's deliberately **small and focused** — not a do-everything personal assistant, but a **server operator you can text.**
+
+## How's this different from OpenClaw & the others?
+
+OpenClaw (and lean clones like Nanobot/ZeroClaw) are *general* AI assistants — calendar, browser, do-anything, 20+ channels, hefty footprint. Overseer does **one job well: watching and running your server** — in a **zero-dependency, ~12 MB** package that won't strain the box it's guarding. It also survives the real-world walls (rate-limits, Cloudflare blocks, oversized requests) by recovering instead of erroring. Where OpenClaw's been called a security "nightmare," Overseer is the small, careful, locked-down one.
 
 ## Install
 

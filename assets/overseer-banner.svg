@@ -39,7 +39,7 @@
 
   <!-- wordmark -->
   <text x="272" y="150" font-size="86" font-weight="800" fill="#eaf2fb" letter-spacing="7">OVERSEER</text>
-  <text x="276" y="204" font-size="26" fill="#8aa0b8" letter-spacing="0.5">lean &#183; self-healing &#183; multi-provider AI agent for your server</text>
+  <text x="276" y="204" font-size="26" fill="#8aa0b8" letter-spacing="0.5">watches your server &#183; fixes it on command &#183; self-healing</text>
 
   <!-- heartbeat pulse (self-healing motif) -->
   <path d="M276 250 H452 l16 -30 22 60 18 -44 14 26 H812" fill="none" stroke="url(#acc)"
