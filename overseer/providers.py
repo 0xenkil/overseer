@@ -199,8 +199,11 @@ class Groq(Provider):
             "name": s["name"], "description": s["description"], "parameters": s["parameters"]}} for s in TOOL_SPECS]
 
     def _chat_once(self, history, model):
-        body = {"model": model,
-                "messages": [{"role": "system", "content": self.system}] + history,
+        # strip 'reasoning' from EVERY history message (not just new ones) so old saved
+        # chats from before the fix don't re-trigger Groq's "reasoning not supported" 400
+        msgs = [{"role": "system", "content": self.system}]
+        msgs += [{k: v for k, v in m.items() if k != "reasoning"} for m in history]
+        body = {"model": model, "messages": msgs,
                 "tools": self._tools(), "tool_choice": "auto", "temperature": 0.6}
         r = _post(self.url, {"Authorization": "Bearer " + self.api_key}, body)
         msg = r["choices"][0]["message"]

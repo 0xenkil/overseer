@@ -13,6 +13,9 @@ from .telegram import Telegram
 def diagnose(exc):
     """Classify an exception -> (category, human message, suggested fix)."""
     s = str(exc).lower()
+    if "413" in s or "too large" in s:
+        return ("too-big", "that task pulled more data than the free token-per-minute limit allows in one request",
+                "ask something narrower, switch to a lighter model (`overseer provider` -> Fastest), or raise limits on Groq's free Dev tier")
     if isinstance(exc, providers.AuthError) or "401" in s or "403" in s or ("key" in s and "invalid" in s):
         return ("auth", "the LLM credentials were rejected",
                 "run `overseer setup` to re-enter the key, or `overseer provider` to switch backend")

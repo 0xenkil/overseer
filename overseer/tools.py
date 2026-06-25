@@ -5,7 +5,9 @@ import re
 import subprocess
 import urllib.request
 
-MAX_OUT = 6000
+# cap tool output so a single request stays well under tight free-tier token/min limits
+# (e.g. Groq gpt-oss = 8000 TPM); big dumps get truncated rather than 413-ing the request
+MAX_OUT = 3000
 
 TOOL_SPECS = [
     {"name": "run_shell",
