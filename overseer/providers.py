@@ -31,6 +31,10 @@ class ProviderError(Exception):
     """Bad request / unexpected - not retryable."""
 
 
+class RequestTooLarge(Exception):
+    """Request exceeded the model's token limit (413) - shrink history and retry."""
+
+
 class Reply:
     def __init__(self, text, calls, assistant_turn):
         self.text = text                # final text (when calls is empty)
@@ -54,6 +58,8 @@ def _post(url, headers, body, timeout=120):
         detail = e.read().decode("utf-8", "replace")[:300]
         if e.code in (401, 403):
             raise AuthError(f"{e.code} {detail}")
+        if e.code == 413 or "too large" in detail.lower():
+            raise RequestTooLarge(f"{e.code} {detail}")
         if e.code in (408, 409, 429, 500, 502, 503, 504):
             raise RateLimited(f"{e.code} {detail}")
         raise ProviderError(f"{e.code} {detail}")
@@ -107,6 +113,14 @@ class Provider:
 
     def ping(self):  # -> (ok: bool, detail: str)
         raise NotImplementedError
+
+    def compact(self, history):
+        """Shrink a too-large request: stub all but the most recent few tool outputs,
+        keeping message structure intact. Returns (new_history, changed_bool)."""
+        return history, False
+
+
+_STUB = "[older output trimmed to fit the model's token limit]"
 
 
 # ----------------------------------------------------------------------------- Gemini (API key)
@@ -167,6 +181,21 @@ class GeminiAPI(Provider):
             return False, f"auth rejected: {e}"
         except Exception as e:
             return False, str(e)
+
+    def compact(self, history):
+        idxs = [i for i, t in enumerate(history)
+                if any("functionResponse" in p for p in t.get("parts", []))]
+        keep = set(idxs[-2:])
+        changed = False
+        for i in idxs:
+            if i in keep:
+                continue
+            for p in history[i].get("parts", []):
+                fr = p.get("functionResponse")
+                if fr and fr.get("response") != {"output": _STUB}:
+                    fr["response"] = {"output": _STUB}
+                    changed = True
+        return history, changed
 
 
 # ----------------------------------------------------------------------------- Gemini (OAuth, experimental)
@@ -238,6 +267,16 @@ class Groq(Provider):
         except Exception as e:
             return False, str(e)
 
+    def compact(self, history):
+        idxs = [i for i, m in enumerate(history) if m.get("role") == "tool"]
+        keep = set(idxs[-2:])
+        changed = False
+        for i in idxs:
+            if i not in keep and history[i].get("content") != _STUB:
+                history[i]["content"] = _STUB
+                changed = True
+        return history, changed
+
 
 # ----------------------------------------------------------------------------- Claude (Anthropic)
 class Claude(Provider):
@@ -280,6 +319,20 @@ class Claude(Provider):
             return False, f"auth rejected: {e}"
         except Exception as e:
             return False, str(e)
+
+    def compact(self, history):
+        idxs = [i for i, m in enumerate(history)
+                if isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"])]
+        keep = set(idxs[-2:])
+        changed = False
+        for i in idxs:
+            if i in keep:
+                continue
+            for b in history[i]["content"]:
+                if b.get("type") == "tool_result" and b.get("content") != _STUB:
+                    b["content"] = _STUB
+                    changed = True
+        return history, changed
 
 
 # GeminiOAuth is kept in the codebase but NOT advertised: it needs Google's Code Assist

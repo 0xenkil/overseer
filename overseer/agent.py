@@ -59,7 +59,19 @@ class Agent:
         hist = self.load(cid)
         hist += self.provider.user_turn(text)
         for _ in range(self.cfg.get("max_tool_iters", 25)):
-            reply = self.provider.chat(hist)
+            reply = None
+            for _attempt in range(5):  # on 413: trim old tool outputs and retry
+                try:
+                    reply = self.provider.chat(hist)
+                    break
+                except providers.RequestTooLarge:
+                    hist, changed = self.provider.compact(hist)
+                    if not changed:
+                        break
+            if reply is None:
+                self.save(cid, hist)
+                return ("That task pulled more data than the model's token limit allows, even after trimming. "
+                        "Try a narrower request, or switch model with /model.")
             hist.append(reply.assistant_turn)
             if reply.calls:
                 results = []
