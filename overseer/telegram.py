@@ -46,6 +46,13 @@ class Telegram:
         except Exception:
             pass
 
+    def set_my_commands(self, commands):
+        """Register the slash-command menu so Telegram's '/' button lists them."""
+        try:
+            self.call("setMyCommands", {"commands": commands}, timeout=15)
+        except Exception:
+            pass
+
     def send(self, chat_id, text):
         for chunk in _split(text):
             try:

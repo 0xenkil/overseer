@@ -95,23 +95,40 @@ class Agent:
         while not stop.wait(6):
             self.tg.send_chat_action(cid)
 
+    HELP = ("I'm Overseer - I run this server for you. Just tell me what you need, plain English:\n"
+            "  • \"is everything healthy?\"\n"
+            "  • \"what's eating disk / memory?\"\n"
+            "  • \"restart nginx\" / \"set up a nightly backup\"\n"
+            "  • \"look up X\" / recon & research\n\n"
+            "Commands:\n"
+            "/status – server + agent health\n"
+            "/model – which AI is running\n"
+            "/new – forget this chat, start fresh\n"
+            "/whoami – your id + backend\n"
+            "/help – this message")
+
     def command(self, cid, text):
         c = text.split()[0].lower().split("@")[0]
         if c in ("/start", "/help"):
-            self.tg.send(cid, "Overseer online. I run this box and get things done - just tell me what you need.\n"
-                              "/new  reset this chat's memory\n/status  health checkup\n/whoami  current model + your chat id")
+            self.tg.send(cid, self.HELP)
             return True
         if c in ("/new", "/reset"):
             self.save(cid, [])
-            self.tg.send(cid, "Wiped. Clean slate.")
+            self.tg.send(cid, "Done – memory cleared, fresh start.")
             return True
         if c == "/status":
             self.tg.send(cid, doctor.format_report(doctor.run_checks(self.cfg)))
             return True
         if c == "/whoami":
-            self.tg.send(cid, f"provider: {self.cfg.get('provider')} | models: {', '.join(self.provider.models)} | your chat: {cid}")
+            self.tg.send(cid, f"backend: {self.cfg.get('provider')}\nmodel: {self.provider.models[0]}\nyour chat id: {cid}")
             return True
-        return False
+        if c == "/model":
+            fb = ", ".join(self.provider.models[1:]) or "none"
+            self.tg.send(cid, f"Running: {self.cfg.get('provider')} / {self.provider.models[0]}\nFallbacks: {fb}\n"
+                              f"To switch, on the server run:  overseer provider")
+            return True
+        self.tg.send(cid, f"I don't know {c}. Try /help.")
+        return True
 
     # --- workers ---
     def worker(self):
@@ -138,6 +155,13 @@ class Agent:
     def run(self):
         log(f"Overseer up. provider={self.cfg.get('provider')} models={self.provider.models} allowed={sorted(self.allowed)}")
         self.tg.delete_webhook(True)
+        self.tg.set_my_commands([
+            {"command": "help", "description": "what I can do"},
+            {"command": "status", "description": "server + agent health"},
+            {"command": "model", "description": "which AI is running"},
+            {"command": "new", "description": "start fresh (clear memory)"},
+            {"command": "whoami", "description": "your id + backend"},
+        ])
         threading.Thread(target=self.worker, daemon=True).start()
         threading.Thread(target=self.health_loop, daemon=True).start()
         offset = 0

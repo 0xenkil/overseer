@@ -265,7 +265,10 @@ class Claude(Provider):
             return False, str(e)
 
 
-PROVIDERS = {p.name: p for p in (GeminiAPI, GeminiOAuth, Groq, Claude)}
+# GeminiOAuth is kept in the codebase but NOT advertised: it needs Google's Code Assist
+# API (a different endpoint/format) to actually work. Deferred rather than shipped as a
+# dead button. The three below are fully functional.
+PROVIDERS = {p.name: p for p in (GeminiAPI, Groq, Claude)}
 
 
 def build(cfg, system, log=print):

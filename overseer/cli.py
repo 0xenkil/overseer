@@ -38,52 +38,91 @@ def _choose(prompt, options, default_idx=0):
             return options[int(raw) - 1]
 
 
+KEY_HELP = {
+    "gemini-api": ("Google Gemini API key (free)", "https://aistudio.google.com/apikey",
+                   ["Open the link, sign in with Google",
+                    "Click 'Create API key'",
+                    "Copy it (starts with 'AIza...')"]),
+    "groq": ("Groq API key (free)", "https://console.groq.com/keys",
+             ["Open the link, sign in (Google or GitHub)",
+              "Click 'Create API Key'",
+              "Copy it (starts with 'gsk_...')"]),
+    "claude": ("Anthropic Claude API key", "https://console.anthropic.com/settings/keys",
+               ["Open the link, sign in",
+                "Create a key under 'API Keys'",
+                "Copy it (starts with 'sk-ant-...')"]),
+}
+
+TG_COMMANDS = [
+    {"command": "help", "description": "what I can do"},
+    {"command": "status", "description": "server + agent health"},
+    {"command": "model", "description": "which AI is running"},
+    {"command": "new", "description": "start fresh (clear memory)"},
+    {"command": "whoami", "description": "your id + backend"},
+]
+
+
 def cmd_setup(args):
-    print(f"\n=== Overseer setup (v{__version__}) ===\n")
+    print(f"\n========== Overseer setup (v{__version__}) ==========")
+    print("Three quick steps - I'll tell you exactly what to do.\n")
     cfg = configmod.load()
 
-    # 1. provider
-    prov = _choose("Which AI backend should power the agent?",
-                   ["gemini-api  (Google AI Studio key - free, easy)",
-                    "groq  (Groq API key - free + very fast, recommended)",
-                    "claude  (Anthropic API key - strongest)"],
-                   default_idx=0).split()[0]
+    # ---- STEP 1: the AI brain ----
+    print("STEP 1 of 3  -  Choose the AI brain\n")
+    pick = _choose("Which AI should run your agent?",
+                   ["Gemini  -  free & easy, great all-rounder",
+                    "Groq    -  free & blazing fast   (recommended)",
+                    "Claude  -  smartest, but paid"],
+                   default_idx=1)
+    prov = {"Gemini": "gemini-api", "Groq": "groq", "Claude": "claude"}[pick.split()[0]]
     cfg["provider"] = prov
+    cfg["model"] = None  # auto-pick - users never deal with model ids
 
-    # 2. credentials
-    if prov == "gemini-oauth":
-        print("Using OAuth token from ~/.gemini/oauth_creds.json (run `gemini` once to log in if needed).")
-        cfg["api_key"] = ""
-    else:
-        label = {"gemini-api": "Google AI Studio API key", "groq": "Groq API key", "claude": "Anthropic API key"}[prov]
-        cfg["api_key"] = _ask(f"Paste your {label}", default=cfg.get("api_key") or None, secret=True)
+    label, link, steps = KEY_HELP[prov]
+    print(f"\nYou'll need a {label}. Here's how to get one:")
+    print(f"   -> {link}")
+    for i, s in enumerate(steps, 1):
+        print(f"      {i}. {s}")
+    cfg["api_key"] = _ask(f"\nPaste your {label} here")
 
-    # 3. model
-    chain = providers.PROVIDERS[prov].default_models
-    print(f"Default model chain for {prov}: {', '.join(chain)}")
-    m = _ask("Model id (blank = use the default chain)", default="")
-    cfg["model"] = m or None
-
-    # 4. telegram token
-    cfg["telegram_token"] = _ask("Telegram bot token (from @BotFather)", default=cfg.get("telegram_token") or None, secret=True)
-
-    # 5. chat-id auto-detect (pause the running service first so it doesn't eat the update)
-    tg = Telegram(cfg["telegram_token"])
+    print("   checking the key ...", end=" ", flush=True)
     try:
-        me = tg.get_me()
-        print(f"Connected to bot: @{me['result']['username']}")
+        ok, detail = providers.build(cfg, "ping").ping()
+        if ok:
+            print("works!")
+        elif any(x in detail.lower() for x in ("429", "quota", "rate", "exhaust")):
+            print("valid (just rate-limited right now - that's fine).")
+        else:
+            print(f"rejected: {detail[:50]} ... you can fix it later with `overseer provider`.")
     except Exception as e:
-        print(f"! couldn't reach the bot ({e}). Double-check the token.")
+        print(f"couldn't verify ({str(e)[:40]}).")
+
+    # ---- STEP 2: the Telegram bot ----
+    print("\nSTEP 2 of 3  -  Create your Telegram bot (this is how you'll chat with it)\n")
+    print("   1. In Telegram, open a chat with  @BotFather")
+    print("   2. Send:  /newbot")
+    print("   3. Give it a name, then a username that ends in 'bot'")
+    print("   4. BotFather sends you a token like  123456789:AAE-xxxxxxxxxxxxxxxx")
+    cfg["telegram_token"] = _ask("\nPaste that bot token here")
+    tg = Telegram(cfg["telegram_token"])
+    botname = "your bot"
+    try:
+        botname = "@" + tg.get_me()["result"]["username"]
+        print(f"   connected to {botname}")
+    except Exception as e:
+        print(f"   ! couldn't reach that bot ({str(e)[:50]}) - re-run setup with the right token.")
+
+    # ---- STEP 3: lock it to you ----
+    print("\nSTEP 3 of 3  -  Lock the bot to you (so only you can command it)\n")
     paused = _sc("is-active", SERVICE).strip() == "active"
     if paused:
-        print("(pausing the running agent so it doesn't grab the message)")
         _sc("stop", SERVICE)
-    tg.delete_webhook(False)  # keep pending updates - don't drop the user's message
+    tg.delete_webhook(False)
     ids = []
-    print("\nOpen Telegram and send ANY message to your bot now.")
-    input("Press Enter AFTER you've sent it... ")
-    print("listening for your message (up to ~20s)...")
-    off, deadline = 0, time.time() + 20
+    print(f"   Open {botname} in Telegram and send it any message (e.g. 'hi').")
+    input("   Press Enter AFTER you've sent it ... ")
+    print("   looking for your message ...", end=" ", flush=True)
+    off, deadline = 0, time.time() + 25
     while time.time() < deadline and not ids:
         try:
             for u in tg.get_updates(offset=off, timeout=3).get("result", []):
@@ -91,37 +130,30 @@ def cmd_setup(args):
                 ch = (u.get("message") or u.get("edited_message") or {}).get("chat", {})
                 if ch.get("id") and str(ch["id"]) not in ids:
                     ids.append(str(ch["id"]))
-                    print(f"  got it -> {ch['id']}  ({ch.get('username') or ch.get('first_name', '?')})")
         except Exception:
             time.sleep(1)
     if ids:
-        keep = _ask(f"Lock the agent to these chat id(s) {','.join(ids)}? (comma-list to edit)", default=",".join(ids))
-        cfg["allowed_chat_ids"] = [x.strip() for x in keep.split(",") if x.strip()]
+        print(f"got you (chat id {ids[0]}).")
+        cfg["allowed_chat_ids"] = ids
     else:
-        manual = _ask("Enter the allowed Telegram chat id(s), comma-separated")
+        print("didn't catch it.")
+        manual = _ask("   No problem - message @userinfobot in Telegram to get your id number, paste it here")
         cfg["allowed_chat_ids"] = [x.strip() for x in manual.split(",") if x.strip()]
     cfg["owner_chat_id"] = cfg["allowed_chat_ids"][0] if cfg["allowed_chat_ids"] else ""
-
-    # 6. protected services
-    prot = _ask("Critical services the agent must NEVER touch without asking (comma-list, blank to skip)", default="")
-    cfg["protected_services"] = [x.strip() for x in prot.split(",") if x.strip()]
+    cfg["protected_services"] = cfg.get("protected_services") or []
 
     path = configmod.save(cfg)
-    print(f"\nSaved config -> {path}")
+    tg.set_my_commands(TG_COMMANDS)  # so the '/' menu shows up in Telegram
+    print(f"\nSaved ✓  ({path})")
 
-    # 7. validate
-    print("\nRunning a quick checkup...")
-    for name, ok, detail in doctor.run_checks(cfg):
-        print(f"  [{'OK' if ok else 'XX'}] {name}: {detail}")
-
-    # 8. offer install
-    if os.name == "posix" and _ask("Install as a 24/7 systemd service now? (y/n)", default="y").lower().startswith("y"):
+    print("")
+    if os.name == "posix" and _ask("Run it 24/7 now (install as a background service)? (y/n)", default="y").lower().startswith("y"):
         cmd_install(args)
+        print(f"\nAll set! Open {botname} in Telegram and say hi. \U0001F47B")
     else:
         if paused:
             _sc("start", SERVICE)
-            print("(resumed the running agent with the new config)")
-        print("\nDone. Start it anytime with:  overseer install  (service)  or  overseer run  (foreground)")
+        print(f"\nDone. Start it with:  overseer install   - then open {botname} in Telegram.")
 
 
 def _service_unit():
