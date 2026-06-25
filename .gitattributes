@@ -1,0 +1,4 @@
+# This project runs on Linux servers - keep LF endings everywhere.
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf

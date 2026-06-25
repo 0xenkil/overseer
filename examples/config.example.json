@@ -1,0 +1,11 @@
+{
+  "provider": "gemini-api",
+  "model": null,
+  "api_key": "YOUR_API_KEY_HERE",
+  "telegram_token": "123456:ABC-your-botfather-token",
+  "allowed_chat_ids": ["123456789"],
+  "owner_chat_id": "123456789",
+  "cmd_timeout": 180,
+  "max_tool_iters": 25,
+  "protected_services": ["xray", "tor"]
+}

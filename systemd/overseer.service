@@ -1,0 +1,18 @@
+# Reference unit. `overseer install` generates this automatically with the right
+# paths filled in. Place at /etc/systemd/system/overseer.service if installing by hand.
+[Unit]
+Description=Overseer agent (Telegram AI operator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/opt/overseer
+Environment=OVERSEER_CONFIG=/root/.overseer/config.json
+ExecStart=/usr/bin/python3 -m overseer run
+Restart=always
+RestartSec=3
+MemoryHigh=450M
+
+[Install]
+WantedBy=multi-user.target
