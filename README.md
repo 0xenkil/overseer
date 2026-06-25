@@ -38,7 +38,7 @@ overseer: Cleared 4.2G of rotated logs + apt cache. Disk now 71%. 👍
 On your VPS (Linux, Python 3.8+):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TheENkil/overseer/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/enuka2007/overseer/main/install.sh | sh
 overseer setup
 ```
 

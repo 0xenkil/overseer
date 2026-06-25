@@ -1,10 +1,10 @@
 #!/bin/sh
 # Overseer one-line installer.
-#   curl -fsSL https://raw.githubusercontent.com/TheENkil/overseer/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/enuka2007/overseer/main/install.sh | sh
 # Then:  overseer setup
 set -e
 
-REPO="${OVERSEER_REPO:-https://github.com/TheENkil/overseer}"
+REPO="${OVERSEER_REPO:-https://github.com/enuka2007/overseer}"
 DEST="${OVERSEER_HOME:-/opt/overseer}"
 PY="$(command -v python3 || true)"
 
