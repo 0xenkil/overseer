@@ -106,7 +106,10 @@ class Provider:
 # ----------------------------------------------------------------------------- Gemini (API key)
 class GeminiAPI(Provider):
     name = "gemini-api"
-    default_models = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.0-flash"]
+    # gemini-2.5/2.0-flash are rock-solid for tool loops and have higher free quota.
+    # gemini-3 preview models require a stricter thought_signature round-trip on
+    # parallel tool calls - set `model` explicitly in config if you want them.
+    default_models = ["gemini-2.5-flash", "gemini-2.0-flash"]
     base = "https://generativelanguage.googleapis.com/v1beta"
 
     def _auth(self, url):
