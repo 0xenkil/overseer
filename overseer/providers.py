@@ -211,7 +211,13 @@ class Groq(Provider):
             except Exception:
                 args = {}
             calls.append({"id": tc["id"], "name": tc["function"]["name"], "args": args})
-        return Reply((msg.get("content") or "").strip(), calls, msg)
+        # Keep ONLY fields valid as an input message. Reasoning models (gpt-oss) add a
+        # 'reasoning' field that the API rejects when echoed back on the next round
+        # ("reasoning is not supported with this model").
+        clean = {"role": "assistant", "content": msg.get("content")}
+        if msg.get("tool_calls"):
+            clean["tool_calls"] = msg["tool_calls"]
+        return Reply((msg.get("content") or "").strip(), calls, clean)
 
     def user_turn(self, text):
         return [{"role": "user", "content": text}]
