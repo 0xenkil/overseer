@@ -83,19 +83,29 @@ class Provider:
         self.cfg = cfg
         self.system = system
         self.log = log
-        self.api_key = cfg.get("api_key", "")
+        # per-provider key (set from Telegram /setkey) falls back to the single api_key
+        self.api_key = (cfg.get("keys") or {}).get(self.name) or cfg.get("api_key", "")
         self.models = [cfg["model"]] if cfg.get("model") else list(self.default_models)
 
     def chat(self, history):
         last = None
         for rnd in range(4):
+            too_large_all = True
             for model in self.models:
                 try:
                     return self._chat_once(history, model)
+                except RequestTooLarge:
+                    last = f"{model} too-large"
+                    self.log("provider", self.name, last, "- trying next/higher-limit model")
+                    continue  # a different model may have a bigger token budget
                 except RateLimited as e:
                     last = f"{model} {e}"
+                    too_large_all = False
                     self.log("provider", self.name, last)
                     continue
+            if too_large_all:
+                # every model rejected purely for size; backoff won't help - let the agent compact
+                raise RequestTooLarge(f"{self.name}: request too large on all models ({last})")
             wait = min(6 * (rnd + 1), 20)
             self.log(f"all {self.name} models busy (round {rnd + 1}/4), backing off {wait}s")
             time.sleep(wait)

@@ -78,7 +78,7 @@ overseer logs        tail the live logs
 overseer start|stop|restart
 ```
 
-In Telegram (the `/` menu lists them): `/status` (health) · `/model` (current AI) · `/new` (reset memory) · `/whoami` · `/help`.
+In Telegram (the `/` menu lists them): `/status` · `/model` (switch model) · `/provider` (switch backend) · `/setkey <provider> <key>` (add/replace an API key, live) · `/new` · `/whoami` · `/help`. You can change models, swap backends, and drop in new API keys **entirely from your phone** — no SSH, no restart.
 
 ## What the agent can do
 

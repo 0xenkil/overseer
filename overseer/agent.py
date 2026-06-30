@@ -21,9 +21,21 @@ def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
+# models offered by /model (you can also type any model id your backend supports)
+MODELS_BY_PROVIDER = {
+    "gemini-api": ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"],
+    "groq": ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.1-8b-instant",
+             "qwen/qwen3-32b", "meta-llama/llama-4-scout-17b-16e-instruct"],
+    "claude": ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-8"],
+}
+
+
 class Agent:
     def __init__(self, cfg):
         self.cfg = cfg
+        # remember the active provider's existing key so /provider can switch back to it
+        if cfg.get("api_key") and cfg.get("provider") not in (cfg.get("keys") or {}):
+            cfg.setdefault("keys", {})[cfg["provider"]] = cfg["api_key"]
         os.makedirs(cfg["state_dir"], exist_ok=True)
         self.tg = Telegram(cfg["telegram_token"])
         self.system = system_prompt(cfg.get("protected_services"))
@@ -115,33 +127,98 @@ class Agent:
             "  • \"look up X\" / recon & research\n\n"
             "Commands:\n"
             "/status – server + agent health\n"
-            "/model – which AI is running\n"
+            "/model – show / switch the AI model\n"
+            "/provider – show / switch backend (gemini·groq·claude)\n"
+            "/setkey – add an API key:  /setkey groq gsk_...\n"
             "/new – forget this chat, start fresh\n"
             "/whoami – your id + backend\n"
             "/help – this message")
 
+    def _rebuild_provider(self):
+        self.provider = providers.build(self.cfg, self.system, log)
+
     def command(self, cid, text):
-        c = text.split()[0].lower().split("@")[0]
+        parts = text.split()
+        c = parts[0].lower().split("@")[0]
+        arg = " ".join(parts[1:]).strip()
         if c in ("/start", "/help"):
-            self.tg.send(cid, self.HELP)
-            return True
+            self.tg.send(cid, self.HELP); return True
         if c in ("/new", "/reset"):
-            self.save(cid, [])
-            self.tg.send(cid, "Done – memory cleared, fresh start.")
-            return True
+            self.save(cid, []); self.tg.send(cid, "Done – memory cleared, fresh start."); return True
         if c == "/status":
-            self.tg.send(cid, doctor.format_report(doctor.run_checks(self.cfg)))
-            return True
+            self.tg.send(cid, doctor.format_report(doctor.run_checks(self.cfg))); return True
         if c == "/whoami":
-            self.tg.send(cid, f"backend: {self.cfg.get('provider')}\nmodel: {self.provider.models[0]}\nyour chat id: {cid}")
-            return True
+            self.tg.send(cid, f"backend: {self.cfg.get('provider')}\nmodel: {self.provider.models[0]}\nyour chat id: {cid}"); return True
         if c == "/model":
-            fb = ", ".join(self.provider.models[1:]) or "none"
-            self.tg.send(cid, f"Running: {self.cfg.get('provider')} / {self.provider.models[0]}\nFallbacks: {fb}\n"
-                              f"To switch, on the server run:  overseer provider")
-            return True
-        self.tg.send(cid, f"I don't know {c}. Try /help.")
+            return self._cmd_model(cid, arg)
+        if c in ("/provider", "/providers"):
+            return self._cmd_provider(cid, arg) if (c == "/provider" and arg) else self._cmd_providers(cid)
+        if c == "/setkey":
+            return self._cmd_setkey(cid, arg)
+        self.tg.send(cid, f"I don't know {c}. Try /help."); return True
+
+    def _cmd_model(self, cid, arg):
+        prov = self.cfg.get("provider")
+        cur = self.provider.models[0]
+        if not arg:
+            opts = MODELS_BY_PROVIDER.get(prov, [])
+            lines = [f"🧠 *Current:* `{prov}/{cur}`", "", "Switch with `/model <name>`:"]
+            lines += [("✅ " if m == cur else "• ") + f"`{m}`" for m in opts]
+            lines.append("_(or type any model id your backend supports)_")
+            self.tg.send(cid, "\n".join(lines)); return True
+        self.cfg["model"] = arg
+        configmod.save(self.cfg)
+        self._rebuild_provider()
+        ok, detail = self.provider.ping()
+        self.tg.send(cid, f"{'✅' if ok else '⚠️'} Model → `{prov}/{arg}`" + ("" if ok else f"\n_{detail[:60]}_")); return True
+
+    def _cmd_provider(self, cid, arg):
+        prov = arg.lower().split()[0]
+        if prov not in providers.PROVIDERS:
+            self.tg.send(cid, f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
+        has_key = (self.cfg.get("keys") or {}).get(prov) or (prov == self.cfg.get("provider") and self.cfg.get("api_key"))
+        if not has_key:
+            self.tg.send(cid, f"No API key for *{prov}* yet.\nAdd one first: `/setkey {prov} <your-key>`"); return True
+        self.cfg["provider"] = prov
+        self.cfg["model"] = None
+        if (self.cfg.get("keys") or {}).get(prov):
+            self.cfg["api_key"] = self.cfg["keys"][prov]
+        configmod.save(self.cfg)
+        self._rebuild_provider()
+        ok, detail = self.provider.ping()
+        self.tg.send(cid, f"{'✅' if ok else '⚠️'} Backend → *{prov}* (`{self.provider.models[0]}`)" + ("" if ok else f"\n_{detail[:60]}_")); return True
+
+    def _cmd_setkey(self, cid, arg):
+        sp = arg.split()
+        if len(sp) < 2:
+            self.tg.send(cid, "Usage: `/setkey <provider> <api-key>`\ne.g. `/setkey groq gsk_...`\nBackends: " + ", ".join(providers.PROVIDERS)); return True
+        prov, key = sp[0].lower(), sp[1]
+        if prov not in providers.PROVIDERS:
+            self.tg.send(cid, f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
+        self.cfg.setdefault("keys", {})[prov] = key
+        if prov == self.cfg.get("provider"):
+            self.cfg["api_key"] = key
+            self._rebuild_provider()
+        configmod.save(self.cfg)
+        test = dict(self.cfg); test["provider"] = prov; test["api_key"] = key; test["model"] = None
+        try:
+            ok, detail = providers.build(test, "ping").ping()
+        except Exception as e:
+            ok, detail = False, str(e)
+        head = f"✅ Key works — saved for *{prov}*." if ok else f"⚠️ Saved, but the key was rejected: _{detail[:50]}_"
+        self.tg.send(cid, head + f"\nUse it: `/provider {prov}`\n🔒 Delete your /setkey message so the key isn't left in chat.")
         return True
+
+    def _cmd_providers(self, cid):
+        keys = self.cfg.get("keys") or {}
+        active = self.cfg.get("provider")
+        lines = ["🔌 *Backends:*"]
+        for p in providers.PROVIDERS:
+            has = bool(keys.get(p) or (p == active and self.cfg.get("api_key")))
+            tag = "✅ *active*" if p == active else ("🔑 key set" if has else "— no key")
+            lines.append(f"• `{p}`  {tag}")
+        lines.append("\n`/provider <name>` switch · `/setkey <name> <key>` add key · `/model` change model")
+        self.tg.send(cid, "\n".join(lines)); return True
 
     # --- workers ---
     def worker(self):
@@ -190,7 +267,9 @@ class Agent:
         self.tg.set_my_commands([
             {"command": "help", "description": "what I can do"},
             {"command": "status", "description": "server + agent health"},
-            {"command": "model", "description": "which AI is running"},
+            {"command": "model", "description": "show / switch the AI model"},
+            {"command": "provider", "description": "show / switch backend"},
+            {"command": "setkey", "description": "add an API key (/setkey groq <key>)"},
             {"command": "new", "description": "start fresh (clear memory)"},
             {"command": "whoami", "description": "your id + backend"},
         ])

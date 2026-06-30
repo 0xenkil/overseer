@@ -6,9 +6,10 @@ import os
 DEFAULT_PATH = os.environ.get("OVERSEER_CONFIG") or os.path.expanduser("~/.overseer/config.json")
 
 DEFAULTS = {
-    "provider": "gemini-api",        # gemini-api | gemini-oauth | groq | claude
+    "provider": "gemini-api",        # gemini-api | groq | claude
     "model": None,                   # None -> provider's built-in fallback chain
-    "api_key": "",                   # gemini-api / groq / claude (not needed for gemini-oauth)
+    "api_key": "",                   # active provider's key (legacy single-key)
+    "keys": {},                      # per-provider keys {provider: key} (set via Telegram /setkey)
     "telegram_token": "",
     "allowed_chat_ids": [],          # only these Telegram chat ids may command the agent
     "cmd_timeout": 180,              # per-shell-command timeout (s)
