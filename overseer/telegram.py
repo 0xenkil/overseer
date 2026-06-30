@@ -64,3 +64,36 @@ class Telegram:
                     self.call("sendMessage", {"chat_id": chat_id, "text": chunk}, timeout=20)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _kb(rows):
+        # rows: list of rows; each row a list of (label, callback_data) tuples
+        return {"inline_keyboard": [[{"text": l, "callback_data": d} for (l, d) in row] for row in rows]}
+
+    def send_buttons(self, chat_id, text, rows):
+        base = {"chat_id": chat_id, "text": text, "reply_markup": self._kb(rows)}
+        try:
+            self.call("sendMessage", {**base, "parse_mode": "Markdown"}, timeout=20)
+        except Exception:
+            try:
+                self.call("sendMessage", base, timeout=20)
+            except Exception:
+                pass
+
+    def answer_callback(self, cb_id, text=""):
+        try:
+            self.call("answerCallbackQuery", {"callback_query_id": cb_id, "text": text}, timeout=15)
+        except Exception:
+            pass
+
+    def edit_message(self, chat_id, message_id, text, rows=None):
+        base = {"chat_id": chat_id, "message_id": message_id, "text": text}
+        if rows is not None:
+            base["reply_markup"] = self._kb(rows)
+        try:
+            self.call("editMessageText", {**base, "parse_mode": "Markdown"}, timeout=15)
+        except Exception:
+            try:
+                self.call("editMessageText", base, timeout=15)
+            except Exception:
+                pass

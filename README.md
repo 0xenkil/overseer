@@ -78,7 +78,7 @@ overseer logs        tail the live logs
 overseer start|stop|restart
 ```
 
-In Telegram (the `/` menu lists them): `/status` · `/model` (switch model) · `/provider` (switch backend) · `/setkey <provider> <key>` (add/replace an API key, live) · `/new` · `/whoami` · `/help`. You can change models, swap backends, and drop in new API keys **entirely from your phone** — no SSH, no restart.
+In Telegram (the `/` menu lists them): `/status` · `/model` · `/provider` · `/setkey <provider> <key>` · `/new` · `/whoami` · `/help`. `/model` and `/provider` pop **tap-to-select buttons** — switch the model or backend with one tap, no typing. Drop in new API keys live with `/setkey`. Change models, swap backends, add keys **entirely from your phone** — no SSH, no restart.
 
 ## What the agent can do
 

@@ -152,41 +152,60 @@ class Agent:
         if c == "/model":
             return self._cmd_model(cid, arg)
         if c in ("/provider", "/providers"):
-            return self._cmd_provider(cid, arg) if (c == "/provider" and arg) else self._cmd_providers(cid)
+            return self._cmd_provider(cid, arg)
         if c == "/setkey":
             return self._cmd_setkey(cid, arg)
         self.tg.send(cid, f"I don't know {c}. Try /help."); return True
 
+    @staticmethod
+    def _short_model(m):
+        return m.split("/")[-1]  # drop provider prefix for a clean button label
+
     def _cmd_model(self, cid, arg):
         prov = self.cfg.get("provider")
         cur = self.provider.models[0]
-        if not arg:
-            opts = MODELS_BY_PROVIDER.get(prov, [])
-            lines = [f"🧠 *Current:* `{prov}/{cur}`", "", "Switch with `/model <name>`:"]
-            lines += [("✅ " if m == cur else "• ") + f"`{m}`" for m in opts]
-            lines.append("_(or type any model id your backend supports)_")
-            self.tg.send(cid, "\n".join(lines)); return True
-        self.cfg["model"] = arg
-        configmod.save(self.cfg)
-        self._rebuild_provider()
-        ok, detail = self.provider.ping()
-        self.tg.send(cid, f"{'✅' if ok else '⚠️'} Model → `{prov}/{arg}`" + ("" if ok else f"\n_{detail[:60]}_")); return True
+        if arg:  # typed: /model <name>
+            self.cfg["model"] = arg
+            configmod.save(self.cfg)
+            self._rebuild_provider()
+            ok, detail = self.provider.ping()
+            self.tg.send(cid, f"{'✅' if ok else '⚠️'} Model → `{prov}/{arg}`" + ("" if ok else f"\n_{detail[:60]}_"))
+            return True
+        opts = MODELS_BY_PROVIDER.get(prov, [])
+        rows = [[(("✅ " if m == cur else "") + self._short_model(m), "m|" + m)] for m in opts]
+        self.tg.send_buttons(cid, f"🧠 *Model* — backend `{prov}`, now on `{self._short_model(cur)}`.\nTap to switch:", rows)
+        return True
 
     def _cmd_provider(self, cid, arg):
-        prov = arg.lower().split()[0]
+        if arg:
+            return self._switch_provider(cid, arg.lower().split()[0])
+        keys = self.cfg.get("keys") or {}
+        active = self.cfg.get("provider")
+        rows = []
+        for p in providers.PROVIDERS:
+            has = bool(keys.get(p) or (p == active and self.cfg.get("api_key")))
+            mark = "✅ " if p == active else ("🔑 " if has else "➕ ")
+            rows.append([(mark + p + ("" if has else "  (needs key)"), "p|" + p)])
+        self.tg.send_buttons(cid, "🔌 *Backend* — tap to switch:", rows)
+        return True
+
+    def _switch_provider(self, cid, prov, mid=None):
+        send = (lambda t: self.tg.edit_message(cid, mid, t)) if mid else (lambda t: self.tg.send(cid, t))
         if prov not in providers.PROVIDERS:
-            self.tg.send(cid, f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
-        has_key = (self.cfg.get("keys") or {}).get(prov) or (prov == self.cfg.get("provider") and self.cfg.get("api_key"))
-        if not has_key:
-            self.tg.send(cid, f"No API key for *{prov}* yet.\nAdd one first: `/setkey {prov} <your-key>`"); return True
+            send(f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
+        keys = self.cfg.get("keys") or {}
+        has = bool(keys.get(prov) or (prov == self.cfg.get("provider") and self.cfg.get("api_key")))
+        if not has:
+            send(f"🔑 No key for *{prov}* yet. Send:  `/setkey {prov} <your-key>`"); return True
         self.cfg["provider"] = prov
         self.cfg["model"] = None
-        if (self.cfg.get("keys") or {}).get(prov):
-            self.cfg["api_key"] = self.cfg["keys"][prov]
+        if keys.get(prov):
+            self.cfg["api_key"] = keys[prov]
         configmod.save(self.cfg)
         self._rebuild_provider()
         ok, detail = self.provider.ping()
-        self.tg.send(cid, f"{'✅' if ok else '⚠️'} Backend → *{prov}* (`{self.provider.models[0]}`)" + ("" if ok else f"\n_{detail[:60]}_")); return True
+        send(f"{'✅' if ok else '⚠️'} Backend → *{prov}* (`{self.provider.models[0]}`)" + ("" if ok else f"\n_{detail[:50]}_"))
+        return True
 
     def _cmd_setkey(self, cid, arg):
         sp = arg.split()
@@ -206,26 +225,34 @@ class Agent:
         except Exception as e:
             ok, detail = False, str(e)
         head = f"✅ Key works — saved for *{prov}*." if ok else f"⚠️ Saved, but the key was rejected: _{detail[:50]}_"
-        self.tg.send(cid, head + f"\nUse it: `/provider {prov}`\n🔒 Delete your /setkey message so the key isn't left in chat.")
+        self.tg.send(cid, head + f"\nUse it: tap /provider → *{prov}*\n🔒 Delete your /setkey message so the key isn't left in chat.")
         return True
 
-    def _cmd_providers(self, cid):
-        keys = self.cfg.get("keys") or {}
-        active = self.cfg.get("provider")
-        lines = ["🔌 *Backends:*"]
-        for p in providers.PROVIDERS:
-            has = bool(keys.get(p) or (p == active and self.cfg.get("api_key")))
-            tag = "✅ *active*" if p == active else ("🔑 key set" if has else "— no key")
-            lines.append(f"• `{p}`  {tag}")
-        lines.append("\n`/provider <name>` switch · `/setkey <name> <key>` add key · `/model` change model")
-        self.tg.send(cid, "\n".join(lines)); return True
+    def handle_callback(self, cb):
+        cid = str(cb.get("message", {}).get("chat", {}).get("id"))
+        mid = cb.get("message", {}).get("message_id")
+        data = cb.get("data", "")
+        if "|" not in data:
+            return
+        kind, val = data.split("|", 1)
+        if kind == "m":
+            self.cfg["model"] = val
+            configmod.save(self.cfg)
+            self._rebuild_provider()
+            ok, _ = self.provider.ping()
+            self.tg.edit_message(cid, mid, f"🧠 Model → `{self.cfg.get('provider')}/{self._short_model(val)}`  {'✅' if ok else '⚠️ key issue'}")
+        elif kind == "p":
+            self._switch_provider(cid, val, mid=mid)
 
     # --- workers ---
     def worker(self):
         while True:
-            cid, text = self.q.get()
+            item = self.q.get()
             try:
-                self.handle(cid, text)
+                if item[0] == "__cb__":
+                    self.handle_callback(item[1])
+                else:
+                    self.handle(item[0], item[1])
             except Exception:
                 log("worker err", traceback.format_exc())
 
@@ -282,6 +309,14 @@ class Agent:
                 r = self.tg.get_updates(offset)
                 for u in r.get("result", []):
                     offset = u["update_id"] + 1
+                    cb = u.get("callback_query")
+                    if cb:
+                        ccid = str(cb.get("message", {}).get("chat", {}).get("id"))
+                        if self.allowed and ccid not in self.allowed:
+                            continue
+                        self.tg.answer_callback(cb.get("id", ""))  # stop the button spinner immediately
+                        self.q.put(("__cb__", cb))
+                        continue
                     m = u.get("message") or u.get("edited_message")
                     if not m:
                         continue
