@@ -79,7 +79,11 @@ class Agent:
                 except providers.RequestTooLarge:
                     hist, changed = self.provider.compact(hist)
                     if not changed:
-                        break
+                        if len(hist) > 4:
+                            hist = hist[4:]
+                            changed = True
+                        else:
+                            break
             if reply is None:
                 self.save(cid, hist)
                 return ("That task pulled more data than the model's token limit allows, even after trimming. "
@@ -190,6 +194,9 @@ class Agent:
         return True
 
     def _switch_provider(self, cid, prov, mid=None):
+        prov = prov.lower()
+        if prov == "gemini":
+            prov = "gemini-api"
         send = (lambda t: self.tg.edit_message(cid, mid, t)) if mid else (lambda t: self.tg.send(cid, t))
         if prov not in providers.PROVIDERS:
             send(f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
@@ -212,6 +219,8 @@ class Agent:
         if len(sp) < 2:
             self.tg.send(cid, "Usage: `/setkey <provider> <api-key>`\ne.g. `/setkey groq gsk_...`\nBackends: " + ", ".join(providers.PROVIDERS)); return True
         prov, key = sp[0].lower(), sp[1]
+        if prov == "gemini":
+            prov = "gemini-api"
         if prov not in providers.PROVIDERS:
             self.tg.send(cid, f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
         self.cfg.setdefault("keys", {})[prov] = key

@@ -58,10 +58,10 @@ def _post(url, headers, body, timeout=120):
         detail = e.read().decode("utf-8", "replace")[:300]
         if e.code in (401, 403):
             raise AuthError(f"{e.code} {detail}")
-        if e.code == 413 or "too large" in detail.lower():
-            raise RequestTooLarge(f"{e.code} {detail}")
         if e.code in (408, 409, 429, 500, 502, 503, 504):
             raise RateLimited(f"{e.code} {detail}")
+        if e.code == 413 or "too large" in detail.lower():
+            raise RequestTooLarge(f"{e.code} {detail}")
         raise ProviderError(f"{e.code} {detail}")
     except urllib.error.URLError as e:
         raise RateLimited(f"network: {e.reason}")
