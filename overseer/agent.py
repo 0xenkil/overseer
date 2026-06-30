@@ -67,26 +67,59 @@ class Agent:
         except Exception as e:
             log("save err", e)
 
+    def _usable_providers(self):
+        """Backends that have a key configured, the active one first."""
+        keys = self.cfg.get("keys") or {}
+        active = self.cfg.get("provider")
+        order = [active] + [p for p in providers.PROVIDERS if p != active]
+        return [p for p in order if keys.get(p) or (p == active and self.cfg.get("api_key"))]
+
+    def _chat_failover(self, provider, hist):
+        """Try the current backend; if it's rate-limited / out of quota, transparently
+        fail over to another backend you have a key for (history is IR-translated across).
+        Returns (provider, hist, reply). Raises RateLimited only if ALL backends are busy."""
+        try:
+            return provider, hist, provider.chat(hist)
+        except providers.RateLimited:
+            pass
+        for name in self._usable_providers():
+            if name == provider.name:
+                continue
+            try:
+                fb = providers.build({**self.cfg, "provider": name, "model": None}, self.system, log)
+                fb_hist = fb.translate_history(hist)
+                reply = fb.chat(fb_hist)
+                log(f"[failover] {provider.name} busy -> switched to {name}")
+                return fb, fb_hist, reply
+            except providers.RateLimited:
+                continue
+        raise providers.RateLimited("all backends rate-limited")
+
     # --- the agentic loop for one message ---
     def run_task(self, cid, text):
-        hist = self.load(cid)
-        hist = self.provider.translate_history(hist)
-        hist += self.provider.user_turn(text)
-        for _ in range(self.cfg.get("max_tool_iters", 5)):
+        provider = self.provider
+        hist = provider.translate_history(self.load(cid))
+        hist += provider.user_turn(text)
+        for _ in range(self.cfg.get("max_tool_iters", 25)):
             if self.cancel.is_set():
                 self.save(cid, hist)
                 return "🛑 Stopped."
-            hist, _ = self.provider.compact(hist)  # Proactively prune old tool outputs to save tokens
+            hist, _ = provider.compact(hist)  # proactively prune old tool outputs to save tokens
             reply = None
             for _attempt in range(5):  # on 413: trim old tool outputs and retry
                 try:
-                    reply = self.provider.chat(hist)
+                    provider, hist, reply = self._chat_failover(provider, hist)
                     break
                 except providers.RequestTooLarge:
                     if len(hist) > 4:
                         hist = hist[4:]
                     else:
                         break
+                except providers.RateLimited:
+                    self.save(cid, hist)
+                    names = ", ".join(self._usable_providers()) or "none configured"
+                    return (f"⏳ All your backends are busy right now ({names}). Give it a minute, "
+                            f"or add another with /setkey.")
             if reply is None:
                 self.save(cid, hist)
                 return ("That task pulled more data than the model's token limit allows, even after trimming. "
@@ -98,7 +131,7 @@ class Agent:
                     fn = self.dispatch.get(c["name"])
                     out = fn(c["args"]) if fn else {"error": "unknown tool " + str(c["name"])}
                     results.append({"id": c.get("id"), "name": c["name"], "output": out})
-                hist += self.provider.tool_results_turn(results)
+                hist += provider.tool_results_turn(results)
                 continue
             self.save(cid, hist)
             return reply.text or "(done)"

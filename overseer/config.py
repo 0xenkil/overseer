@@ -19,7 +19,7 @@ DEFAULTS = {
     "state_dir": "",                 # conversation memory; defaults next to the config
     # proactive watchdog - messages the owner when the box does something unusual
     "watch_enabled": True,
-    "watch_interval": 300,           # seconds between checks
+    "watch_interval": 90,            # seconds between checks
     "watch_disk_pct": 90,            # alert when disk crosses this %
     "watch_mem_mb": 100,             # alert when available memory drops below this
     "watch_load_mult": 4,            # alert when 5-min load > this * cpu cores

@@ -60,7 +60,9 @@ Pick by friendly label (Fast / Smart / …) — you never touch a raw model id. 
 | `groq` | [console.groq.com](https://console.groq.com/keys) | Free + very fast (default: `gpt-oss-120b`). |
 | `claude` | [console.anthropic.com](https://console.anthropic.com/settings/keys) | Strongest reasoning, paid. |
 
-Switch backend or model anytime:
+**Automatic cross-backend failover:** add keys for more than one backend (`/setkey`), and if your active one is rate-limited or out of quota, Overseer **silently fails over to another backend mid-task** — history intact — so you only ever see an error if *every* backend is down at once.
+
+Switch backend or model anytime (CLI or Telegram `/provider`):
 
 ```bash
 overseer provider
