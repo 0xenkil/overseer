@@ -129,6 +129,112 @@ class Provider:
         keeping message structure intact. Returns (new_history, changed_bool)."""
         return history, False
 
+    def translate_history(self, history):
+        ir = self.to_ir(history)
+        return self.from_ir(ir)
+
+    def to_ir(self, history):
+        ir = []
+        for m in history:
+            if not isinstance(m, dict):
+                continue
+            role = m.get("role")
+            
+            # 1. Gemini format: has 'parts'
+            if "parts" in m:
+                parts = m.get("parts") or []
+                has_fr = any("functionResponse" in p for p in parts)
+                if has_fr:
+                    results = []
+                    for p in parts:
+                        fr = p.get("functionResponse")
+                        if fr:
+                            results.append({
+                                "id": fr.get("id"),
+                                "name": fr.get("name"),
+                                "output": fr.get("response")
+                            })
+                    ir.append({"role": "tool", "results": results})
+                elif role == "user":
+                    text = "".join(p.get("text", "") for p in parts if "text" in p)
+                    ir.append({"role": "user", "text": text})
+                elif role == "model":
+                    text = "".join(p.get("text", "") for p in parts if "text" in p)
+                    calls = []
+                    for p in parts:
+                        fc = p.get("functionCall")
+                        if fc:
+                            calls.append({
+                                "id": fc.get("id"),
+                                "name": fc.get("name"),
+                                "args": fc.get("args") or {}
+                            })
+                    ir.append({"role": "assistant", "text": text, "calls": calls})
+            
+            # 2. OpenAI / Groq / Claude format
+            else:
+                content = m.get("content")
+                if role == "tool":
+                    try:
+                        output = json.loads(content) if isinstance(content, str) else content
+                    except Exception:
+                        output = {"result": content}
+                    ir.append({"role": "tool", "results": [{
+                        "id": m.get("tool_call_id"),
+                        "name": m.get("name"),
+                        "output": output
+                    }]})
+                elif isinstance(content, list):
+                    if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                        results = []
+                        for b in content:
+                            if isinstance(b, dict) and b.get("type") == "tool_result":
+                                try:
+                                    output = json.loads(b.get("content")) if isinstance(b.get("content"), str) else b.get("content")
+                                except Exception:
+                                    output = {"result": b.get("content")}
+                                results.append({
+                                    "id": b.get("tool_use_id"),
+                                    "name": b.get("name") or "tool",
+                                    "output": output
+                                })
+                        ir.append({"role": "tool", "results": results})
+                    else:
+                        text = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+                        calls = []
+                        for b in content:
+                            if isinstance(b, dict) and b.get("type") == "tool_use":
+                                calls.append({
+                                    "id": b.get("id"),
+                                    "name": b.get("name"),
+                                    "args": b.get("input") or {}
+                                })
+                        if role == "user":
+                            ir.append({"role": "user", "text": text})
+                        else:
+                            ir.append({"role": "assistant", "text": text, "calls": calls})
+                else:
+                    text = content or ""
+                    if role == "user":
+                        ir.append({"role": "user", "text": text})
+                    elif role == "assistant":
+                        calls = []
+                        for tc in (m.get("tool_calls") or []):
+                            try:
+                                args = json.loads(tc["function"].get("arguments") or "{}")
+                            except Exception:
+                                args = {}
+                            calls.append({
+                                "id": tc.get("id"),
+                                "name": tc["function"]["name"],
+                                "args": args
+                            })
+                        ir.append({"role": "assistant", "text": text, "calls": calls})
+        return ir
+
+    def from_ir(self, ir):
+        raise NotImplementedError
+
 
 _STUB = "[older output trimmed to fit the model's token limit]"
 
@@ -206,6 +312,31 @@ class GeminiAPI(Provider):
                     fr["response"] = {"output": _STUB}
                     changed = True
         return history, changed
+
+    def from_ir(self, ir):
+        native = []
+        for turn in ir:
+            role = turn["role"]
+            if role == "user":
+                native.append({"role": "user", "parts": [{"text": turn["text"]}]})
+            elif role == "assistant":
+                parts = []
+                if turn["text"]:
+                    parts.append({"text": turn["text"]})
+                for c in turn.get("calls") or []:
+                    parts.append({"functionCall": {"id": c.get("id"), "name": c["name"], "args": c["args"]}})
+                if not parts:
+                    parts.append({"text": ""})
+                native.append({"role": "model", "parts": parts})
+            elif role == "tool":
+                parts = []
+                for r in turn["results"]:
+                    fr = {"name": r["name"], "response": r["output"] if isinstance(r["output"], dict) else {"result": r["output"]}}
+                    if r.get("id"):
+                        fr["id"] = r["id"]
+                    parts.append({"functionResponse": fr})
+                native.append({"role": "user", "parts": parts})
+        return native
 
 
 # ----------------------------------------------------------------------------- Gemini (OAuth, experimental)
@@ -287,6 +418,37 @@ class Groq(Provider):
                 changed = True
         return history, changed
 
+    def from_ir(self, ir):
+        native = []
+        for turn in ir:
+            role = turn["role"]
+            if role == "user":
+                native.append({"role": "user", "content": turn["text"]})
+            elif role == "assistant":
+                m = {"role": "assistant", "content": turn["text"] or None}
+                if turn.get("calls"):
+                    tcs = []
+                    for c in turn["calls"]:
+                        tcs.append({
+                            "id": c["id"] or f"call_{int(time.time()*1000)}",
+                            "type": "function",
+                            "function": {
+                                "name": c["name"],
+                                "arguments": json.dumps(c["args"])
+                            }
+                        })
+                    m["tool_calls"] = tcs
+                native.append(m)
+            elif role == "tool":
+                for r in turn["results"]:
+                    native.append({
+                        "role": "tool",
+                        "tool_call_id": r["id"] or "call_unknown",
+                        "name": r["name"],
+                        "content": json.dumps(r["output"])
+                    })
+        return native
+
 
 # ----------------------------------------------------------------------------- Claude (Anthropic)
 class Claude(Provider):
@@ -343,6 +505,32 @@ class Claude(Provider):
                     b["content"] = _STUB
                     changed = True
         return history, changed
+
+    def from_ir(self, ir):
+        native = []
+        for turn in ir:
+            role = turn["role"]
+            if role == "user":
+                native.append({"role": "user", "content": turn["text"]})
+            elif role == "assistant":
+                content = []
+                if turn["text"]:
+                    content.append({"type": "text", "text": turn["text"]})
+                for c in turn.get("calls") or []:
+                    content.append({"type": "tool_use", "id": c["id"] or f"call_{int(time.time()*1000)}", "name": c["name"], "input": c["args"]})
+                if not content:
+                    content.append({"type": "text", "text": ""})
+                native.append({"role": "assistant", "content": content})
+            elif role == "tool":
+                content = []
+                for r in turn["results"]:
+                    content.append({
+                        "type": "tool_result",
+                        "tool_use_id": r["id"] or "call_unknown",
+                        "content": json.dumps(r["output"])
+                    })
+                native.append({"role": "user", "content": content})
+        return native
 
 
 # GeminiOAuth is kept in the codebase but NOT advertised: it needs Google's Code Assist

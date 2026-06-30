@@ -69,6 +69,7 @@ class Agent:
     # --- the agentic loop for one message ---
     def run_task(self, cid, text):
         hist = self.load(cid)
+        hist = self.provider.translate_history(hist)
         hist += self.provider.user_turn(text)
         for _ in range(self.cfg.get("max_tool_iters", 25)):
             reply = None
