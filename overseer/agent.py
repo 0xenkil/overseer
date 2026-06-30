@@ -71,20 +71,18 @@ class Agent:
         hist = self.load(cid)
         hist = self.provider.translate_history(hist)
         hist += self.provider.user_turn(text)
-        for _ in range(self.cfg.get("max_tool_iters", 25)):
+        for _ in range(self.cfg.get("max_tool_iters", 5)):
+            hist, _ = self.provider.compact(hist)  # Proactively prune old tool outputs to save tokens
             reply = None
             for _attempt in range(5):  # on 413: trim old tool outputs and retry
                 try:
                     reply = self.provider.chat(hist)
                     break
                 except providers.RequestTooLarge:
-                    hist, changed = self.provider.compact(hist)
-                    if not changed:
-                        if len(hist) > 4:
-                            hist = hist[4:]
-                            changed = True
-                        else:
-                            break
+                    if len(hist) > 4:
+                        hist = hist[4:]
+                    else:
+                        break
             if reply is None:
                 self.save(cid, hist)
                 return ("That task pulled more data than the model's token limit allows, even after trimming. "

@@ -7,7 +7,7 @@ import urllib.request
 
 # cap tool output so a single request stays well under tight free-tier token/min limits
 # (e.g. Groq gpt-oss = 8000 TPM); big dumps get truncated rather than 413-ing the request
-MAX_OUT = 2000
+MAX_OUT = 1000
 
 TOOL_SPECS = [
     {"name": "run_shell",
