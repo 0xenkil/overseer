@@ -3,6 +3,11 @@ import json
 import urllib.request
 
 
+def _plain(t):
+    # clean fallback when Telegram rejects our Markdown: drop the emphasis/code markers
+    return str(t).replace("`", "").replace("*", "")
+
+
 def _split(text, n=4000):
     out, cur = [], ""
     for line in str(text).split("\n"):
@@ -61,9 +66,16 @@ class Telegram:
                 self.call("sendMessage", {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}, timeout=20)
             except Exception:
                 try:
-                    self.call("sendMessage", {"chat_id": chat_id, "text": chunk}, timeout=20)
+                    self.call("sendMessage", {"chat_id": chat_id, "text": _plain(chunk)}, timeout=20)
                 except Exception:
                     pass
+
+    def react(self, chat_id, message_id, emoji="👀"):
+        try:
+            self.call("setMessageReaction", {"chat_id": chat_id, "message_id": message_id,
+                                             "reaction": [{"type": "emoji", "emoji": emoji}]}, timeout=10)
+        except Exception:
+            pass
 
     @staticmethod
     def _kb(rows):

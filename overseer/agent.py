@@ -44,6 +44,7 @@ class Agent:
         self.allowed = set(cfg.get("allowed_chat_ids", []))
         self.q = queue.Queue()
         self.last_alert = 0.0
+        self.cancel = threading.Event()  # set by /stop to abort a running task
 
     # --- conversation memory ---
     def _hp(self, cid):
@@ -72,6 +73,9 @@ class Agent:
         hist = self.provider.translate_history(hist)
         hist += self.provider.user_turn(text)
         for _ in range(self.cfg.get("max_tool_iters", 5)):
+            if self.cancel.is_set():
+                self.save(cid, hist)
+                return "🛑 Stopped."
             hist, _ = self.provider.compact(hist)  # Proactively prune old tool outputs to save tokens
             reply = None
             for _attempt in range(5):  # on 413: trim old tool outputs and retry
@@ -102,9 +106,12 @@ class Agent:
         return "Hit the step limit - partial work may be done. Say 'continue' and I'll keep going."
 
     # --- per-message handling ---
-    def handle(self, cid, text):
+    def handle(self, cid, text, mid=None):
         if text.startswith("/") and self.command(cid, text):
             return
+        if mid:
+            self.tg.react(cid, mid, "👀")  # acknowledge receipt
+        self.cancel.clear()
         self.tg.send_chat_action(cid)
         stop = threading.Event()
         threading.Thread(target=self._keep_typing, args=(cid, stop), daemon=True).start()
@@ -133,6 +140,7 @@ class Agent:
             "/model – show / switch the AI model\n"
             "/provider – show / switch backend (gemini·groq·claude)\n"
             "/setkey – add an API key:  /setkey groq gsk_...\n"
+            "/stop – abort the current task\n"
             "/new – forget this chat, start fresh\n"
             "/whoami – your id + backend\n"
             "/help – this message")
@@ -164,6 +172,20 @@ class Agent:
     def _short_model(m):
         return m.split("/")[-1]  # drop provider prefix for a clean button label
 
+    def _model_rows(self, cur):
+        opts = MODELS_BY_PROVIDER.get(self.cfg.get("provider"), [])
+        return [[(("✅ " if m == cur else "") + self._short_model(m), "m|" + m)] for m in opts]
+
+    def _provider_rows(self):
+        keys = self.cfg.get("keys") or {}
+        active = self.cfg.get("provider")
+        rows = []
+        for p in providers.PROVIDERS:
+            has = bool(keys.get(p) or (p == active and self.cfg.get("api_key")))
+            mark = "✅ " if p == active else ("🔑 " if has else "➕ ")
+            rows.append([(mark + p + ("" if has else "  (needs key)"), "p|" + p)])
+        return rows
+
     def _cmd_model(self, cid, arg):
         prov = self.cfg.get("provider")
         cur = self.provider.models[0]
@@ -174,35 +196,32 @@ class Agent:
             ok, detail = self.provider.ping()
             self.tg.send(cid, f"{'✅' if ok else '⚠️'} Model → `{prov}/{arg}`" + ("" if ok else f"\n_{detail[:60]}_"))
             return True
-        opts = MODELS_BY_PROVIDER.get(prov, [])
-        rows = [[(("✅ " if m == cur else "") + self._short_model(m), "m|" + m)] for m in opts]
-        self.tg.send_buttons(cid, f"🧠 *Model* — backend `{prov}`, now on `{self._short_model(cur)}`.\nTap to switch:", rows)
+        self.tg.send_buttons(cid, f"🧠 *Model* — backend `{prov}`, now on `{self._short_model(cur)}`.\nTap to switch:", self._model_rows(cur))
         return True
 
     def _cmd_provider(self, cid, arg):
         if arg:
             return self._switch_provider(cid, arg.lower().split()[0])
-        keys = self.cfg.get("keys") or {}
-        active = self.cfg.get("provider")
-        rows = []
-        for p in providers.PROVIDERS:
-            has = bool(keys.get(p) or (p == active and self.cfg.get("api_key")))
-            mark = "✅ " if p == active else ("🔑 " if has else "➕ ")
-            rows.append([(mark + p + ("" if has else "  (needs key)"), "p|" + p)])
-        self.tg.send_buttons(cid, "🔌 *Backend* — tap to switch:", rows)
+        self.tg.send_buttons(cid, "🔌 *Backend* — tap to switch:", self._provider_rows())
         return True
 
     def _switch_provider(self, cid, prov, mid=None):
         prov = prov.lower()
         if prov == "gemini":
             prov = "gemini-api"
-        send = (lambda t: self.tg.edit_message(cid, mid, t)) if mid else (lambda t: self.tg.send(cid, t))
+
+        def out(text, rows=None):
+            if mid:
+                self.tg.edit_message(cid, mid, text, rows)
+            else:
+                self.tg.send(cid, text)
+
         if prov not in providers.PROVIDERS:
-            send(f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
+            out(f"Unknown backend. Options: {', '.join(providers.PROVIDERS)}"); return True
         keys = self.cfg.get("keys") or {}
         has = bool(keys.get(prov) or (prov == self.cfg.get("provider") and self.cfg.get("api_key")))
         if not has:
-            send(f"🔑 No key for *{prov}* yet. Send:  `/setkey {prov} <your-key>`"); return True
+            out(f"🔑 No key for *{prov}* yet. Send:  `/setkey {prov} <your-key>`"); return True
         self.cfg["provider"] = prov
         self.cfg["model"] = None
         if keys.get(prov):
@@ -210,7 +229,9 @@ class Agent:
         configmod.save(self.cfg)
         self._rebuild_provider()
         ok, detail = self.provider.ping()
-        send(f"{'✅' if ok else '⚠️'} Backend → *{prov}* (`{self.provider.models[0]}`)" + ("" if ok else f"\n_{detail[:50]}_"))
+        status = "✅" if ok else f"⚠️ {detail[:40]}"
+        out(f"🔌 *Backend* — now on *{prov}* (`{self.provider.models[0]}`) {status}. Tap to change:",
+            self._provider_rows() if mid else None)
         return True
 
     def _cmd_setkey(self, cid, arg):
@@ -248,7 +269,8 @@ class Agent:
             configmod.save(self.cfg)
             self._rebuild_provider()
             ok, _ = self.provider.ping()
-            self.tg.edit_message(cid, mid, f"🧠 Model → `{self.cfg.get('provider')}/{self._short_model(val)}`  {'✅' if ok else '⚠️ key issue'}")
+            tag = "✅ switched" if ok else "⚠️ key issue"
+            self.tg.edit_message(cid, mid, f"🧠 *Model* — now on `{self._short_model(val)}` {tag}. Tap to change:", self._model_rows(val))
         elif kind == "p":
             self._switch_provider(cid, val, mid=mid)
 
@@ -260,7 +282,7 @@ class Agent:
                 if item[0] == "__cb__":
                     self.handle_callback(item[1])
                 else:
-                    self.handle(item[0], item[1])
+                    self.handle(item[0], item[1], item[2] if len(item) > 2 else None)
             except Exception:
                 log("worker err", traceback.format_exc())
 
@@ -305,6 +327,7 @@ class Agent:
             {"command": "model", "description": "show / switch the AI model"},
             {"command": "provider", "description": "show / switch backend"},
             {"command": "setkey", "description": "add an API key (/setkey groq <key>)"},
+            {"command": "stop", "description": "abort the current task"},
             {"command": "new", "description": "start fresh (clear memory)"},
             {"command": "whoami", "description": "your id + backend"},
         ])
@@ -329,12 +352,20 @@ class Agent:
                     if not m:
                         continue
                     cid = str(m["chat"]["id"])
-                    txt = m.get("text", "")
+                    txt = m.get("text") or m.get("caption") or ""
+                    mid = m.get("message_id")
                     if self.allowed and cid not in self.allowed:
                         log("ignore unauthorized chat", cid)
                         continue
-                    if txt:
-                        self.q.put((cid, txt))
+                    if not txt:
+                        if any(k in m for k in ("photo", "voice", "audio", "document", "sticker", "video", "video_note")):
+                            self.tg.send(cid, "I only read text right now — type what you need.")
+                        continue
+                    if txt.strip().lower() in ("/stop", "/cancel"):
+                        self.cancel.set()
+                        self.tg.send(cid, "🛑 Stopping after the current step…")
+                        continue
+                    self.q.put((cid, txt, mid))
             except Exception as e:
                 log("poll err", repr(e))
                 time.sleep(3)
