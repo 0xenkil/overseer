@@ -375,7 +375,12 @@ class Groq(Provider):
         msgs += [{k: v for k, v in m.items() if k != "reasoning"} for m in history]
         body = {"model": model, "messages": msgs,
                 "tools": self._tools(), "tool_choice": "auto", "temperature": 0.6}
-        r = _post(self.url, {"Authorization": "Bearer " + self.api_key}, body)
+        try:
+            r = _post(self.url, {"Authorization": "Bearer " + self.api_key}, body)
+        except ProviderError as e:
+            if "tool_use_failed" in str(e):
+                raise RateLimited("Model generated malformed tool JSON (tool_use_failed)")
+            raise
         msg = r["choices"][0]["message"]
         calls = []
         for tc in (msg.get("tool_calls") or []):
