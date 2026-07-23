@@ -263,6 +263,12 @@ class Provider:
 
 
 _STUB = "[older output trimmed to fit the model's token limit]"
+# How many of the most-recent tool outputs to keep verbatim during proactive compaction.
+# Must be generous enough that a multi-step task's gathered facts ALL survive to the
+# synthesis step: keeping only ~2 made the model lose earlier results mid-task and either
+# re-run them (loop -> step-limit) or fabricate them. 8 covers normal operator tasks;
+# genuinely huge cross-task histories still get trimmed.
+KEEP_RECENT_TOOLS = 8
 
 
 # ----------------------------------------------------------------------------- Gemini (API key)
@@ -327,7 +333,7 @@ class GeminiAPI(Provider):
     def compact(self, history):
         idxs = [i for i, t in enumerate(history)
                 if any("functionResponse" in p for p in t.get("parts", []))]
-        keep = set(idxs[-2:])
+        keep = set(idxs[-KEEP_RECENT_TOOLS:])
         changed = False
         for i in idxs:
             if i in keep:
@@ -441,7 +447,7 @@ class Groq(Provider):
 
     def compact(self, history):
         idxs = [i for i, m in enumerate(history) if m.get("role") == "tool"]
-        keep = set(idxs[-2:])
+        keep = set(idxs[-KEEP_RECENT_TOOLS:])
         changed = False
         for i in idxs:
             if i not in keep and history[i].get("content") != _STUB:
@@ -526,7 +532,7 @@ class Claude(Provider):
     def compact(self, history):
         idxs = [i for i, m in enumerate(history)
                 if isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"])]
-        keep = set(idxs[-2:])
+        keep = set(idxs[-KEEP_RECENT_TOOLS:])
         changed = False
         for i in idxs:
             if i in keep:
