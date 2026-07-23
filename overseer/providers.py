@@ -130,8 +130,34 @@ class Provider:
         return history, False
 
     def translate_history(self, history):
-        ir = self.to_ir(history)
+        ir = self._sanitize_ir(self.to_ir(history))
         return self.from_ir(ir)
+
+    @staticmethod
+    def _sanitize_ir(ir):
+        """Repair tool call<->result pairing so no backend ever sees a dangling
+        functionCall or an orphan functionResponse (both are hard 400s on Gemini).
+        Runs on every history load, so any past corruption self-heals. Future-proof."""
+        out = []
+        for turn in ir:
+            r = turn.get("role")
+            if r == "tool":
+                # a tool result is only valid immediately after an assistant turn that made calls
+                if out and out[-1].get("role") == "assistant" and out[-1].get("calls"):
+                    out.append(turn)
+                # else: orphan result -> drop it
+            elif r in ("user", "assistant"):
+                # if the previous assistant made calls that were never answered, strip them
+                if out and out[-1].get("role") == "assistant" and out[-1].get("calls"):
+                    out[-1] = {**out[-1], "calls": []}
+                out.append(turn)
+        # a trailing assistant with unanswered calls -> strip the calls
+        if out and out[-1].get("role") == "assistant" and out[-1].get("calls"):
+            out[-1] = {**out[-1], "calls": []}
+        # conversation must start on a user turn
+        while out and out[0].get("role") != "user":
+            out.pop(0)
+        return out
 
     def to_ir(self, history):
         ir = []

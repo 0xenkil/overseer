@@ -111,8 +111,9 @@ class Agent:
                     provider, hist, reply = self._chat_failover(provider, hist)
                     break
                 except providers.RequestTooLarge:
-                    if len(hist) > 4:
-                        hist = hist[4:]
+                    new_hist, changed = provider.compact(hist)  # structure-safe (never splits call/response pairs)
+                    if changed:
+                        hist = new_hist
                     else:
                         break
                 except providers.RateLimited:
@@ -321,10 +322,14 @@ class Agent:
 
     def health_loop(self):
         while True:
-            time.sleep(600)
+            time.sleep(1800)
             try:
                 ok, detail = self.provider.ping()
-                if not ok and (time.time() - self.last_alert) > 3600:
+                # ONLY alert on a genuinely bad/expired key - never on transient rate-limits or
+                # network blips (failover already covers those). Kills the hourly false spam.
+                auth_fail = (not ok) and any(x in detail.lower() for x in
+                             ("401", "403", "rejected", "invalid", "unauthor", "api key", "api_key", "permission"))
+                if auth_fail and (time.time() - self.last_alert) > 21600:  # at most once per 6h
                     self.last_alert = time.time()
                     owner = self.cfg.get("owner_chat_id")
                     if owner:
